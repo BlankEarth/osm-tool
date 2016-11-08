@@ -2,7 +2,6 @@ var map = L.map( 'map', {
   center: [46.0, 25.0],
   minZoom: 2,
   zoom: 7
-
 });
 
   var redMarker = L.AwesomeMarkers.icon({
@@ -11,7 +10,7 @@ var map = L.map( 'map', {
   });
   var greyMarker = L.AwesomeMarkers.icon({
     icon: 'default',
-    markerColor: 'gray'
+    markerColor: 'pink'
   });
   var greenMarker = L.AwesomeMarkers.icon({
     icon: 'default',
@@ -21,31 +20,55 @@ var map = L.map( 'map', {
     icon: 'default',
     markerColor: 'blue'
   });
+  var blackMarker = L.AwesomeMarkers.icon({
+    icon: 'default',
+    markerColor: 'black'
+  });
 
 var iconMappings = {
     'missingroundabout':redMarker,
     'duplicatedways':greyMarker,
     'orphannodes':blueMarker,
-    'orphanways':greenMarker
+    'orphanways':greenMarker,
+    'closed':blackMarker
   }    
 
-var assignMarkers = function (markers){
-  quarter = parseInt(markers.length/4)
-  var first = markers.slice(0,quarter)
-  var second = markers.slice(quarter,quarter*2)
-  var third = markers.slice(quarter*2,quarter*3)
-  var fourth = markers.slice(quarter*3,quarter*4)
 
-  var markerLayerMappings = {
-    'missingroundabout':first,
-    'duplicatedways':second,
-    'orphannodes':third,
-    'orphanways':fourth
-  }
-  return markerLayerMappings
+  var config = {
+    apiKey: "AIzaSyDzOEtUmCSqRqOJDOujUdsJQcNwYnQJ0ok",
+    authDomain: "realtimemapping.firebaseapp.com",
+    databaseURL: "https://realtimemapping.firebaseio.com",
+    storageBucket: "realtimemapping.appspot.com",
+    messagingSenderId: "1013902661268"
+  };
+  firebase.initializeApp(config);
+  
+  
+var database = firebase.database()
+
+function retrieveData(rootUrl){
+  var promise = database.ref().once('value')
+  return promise
 }
 
+function addIndex(geometries,type){
+  withIndex = []
+  for(var i=0;i<geometries.length;i++){
+    withIndex[i] = geometries[i]
+    withIndex[i]['properties']['index'] = type+'-'+i
+  }
+  return withIndex
+}
 
+var assignMarkers = function(callback){
+
+  var promise = retrieveData('/')
+  promise.then(function(item){
+    markerLayerMappings = item.val()
+    callback(markerLayerMappings)
+  })
+  //return markerLayerMappings
+}
 
 var initMap = function(){
   L.tileLayer( 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -62,67 +85,38 @@ var composeUrlJOSM = function(bbox){
   return rootUrl+bboxUrl
 }
 
-//Create for each marker and edit in Id link
-function editInID(markers, layer) {
+//Create for each marker and edit
+function edit(markers, layer) {
   var josmUrl = "http://localhost:8111/load_object?new_layer=true&objects=w"+markers.properties.id
   var popupContent = "<p>"+ markers.properties.type+"</p>"
   +"<p><a href="+markers.properties.url+" target='_blank'>"+"Edit in iD"+"</a>"+" | " 
-  +"<a href="+josmUrl+" target='_blank'>"+"Edit in JOSM"+"</p>";       
+  +"<a href="+josmUrl+" target='_blank'>"+"Edit in JOSM  " + '|'+
+  "<a  class='change' href='#' id = '"+markers.properties.index+"' '>"+" Change status"+"</p>";
+  
   if (markers.properties && markers.properties.url) {
     popupContent;
   } 
   layer.bindPopup(popupContent);
 }
 
-var editInJOSM = function(feature,layer){
-  bbox = feature['bbox']
-  var url = composeUrlJOSM(bbox)
-  var htmlMarkup = '<p><a href ="'+url+'">Edit in JOSM</a></p>'
-  layer.bindPopup(htmlMarkup)
-}
-
-var getMapBounds = function(callback){
-  map.on('dragend',function(){
-    var east = map.getBounds().getEast()
-    var west = map.getBounds().getWest()
-    var south = map.getBounds().getSouth()
-    var north = map.getBounds().getNorth()
-    bbox = {'west':west,'east':east,'south':south,'north':north}
-    callback(bbox)
-  })
-}
-
-var returnBounds = function(bbox){
-  geometries = []
-  for(key in possible_roundabouts){
-    if(possible_roundabouts.hasOwnProperty(key)){
-       possible_roundabouts[key]['bbox'] = bbox
-       geometries.push(possible_roundabouts[key]) 
-    }
-  }
-  markerMappings = assignMarkers(geometries)
-  
-}
-
 var addToMapGeoJsonLayer = function(geojson,type){
     var geojsonLayer = L.geoJson(geojson, {
-      onEachFeature: editInID,
+      onEachFeature: edit,
       pointToLayer:function(feature,latlng){
+		 
+        if(feature.properties.status == "closed"){
+		   return L.marker(latlng,{
+          icon:iconMappings["closed"]
+        });
+		}else{
         return L.marker(latlng,{
           icon:iconMappings[type]
         });
+	    }
       }
   })
    
   return geojsonLayer 
-}
-
-//var removeJsonLayer = function(mar)
-
-var clearLayers = function(){
-    map.eachLayer(function (layer) {
-    map.removeLayer(layer);
-  });
 }
 
 var clearMap = function(layers){
@@ -132,13 +126,9 @@ var clearMap = function(layers){
   layers = []
 }
 
-getMapBounds(returnBounds)
-map.fire('dragend')
-
 $(function(){
    addedLayers = []
    $("#panel").click(function(){
-     //clearLayers()
      clearMap(addedLayers)
      initMap()
      checkedValues = []
@@ -149,15 +139,43 @@ $(function(){
      })
      
      checkedValues.forEach(function(item){
-       layer = addToMapGeoJsonLayer(markerMappings[item],item)
+       geom = markerMappings[item]
+       layer = addToMapGeoJsonLayer(addIndex(geom,item),item)
        layer.addTo(map)
        addedLayers.push(layer)
      })
    })
-   
-   $("#panel").trigger('click')
-})
 
+assignMarkers(function(item){
+  markerMappings = item
+  $("#panel").trigger('click')
+   })
+  
+  database.ref('/').on('value',function(snapshot){
+    markerMappings = snapshot.val()
+    $("#panel").trigger('click')
+  })
+  
+  $(document).on("click",".change",function(e){
+    var itemInfo = $(this).attr('id')
+    var infoArr  = itemInfo.split("-")
+    var index = infoArr[1]
+    var type = infoArr[0]
+    var item = markerMappings[type][index]
+    if(item['properties']['status']=='closed'){
+	  item['properties']['status']='open'
+	}else {
+	  item['properties']['status']='closed'
+	}
+    $("#panel").trigger('click')
+    var updates = {}
+    var url = '/'+type+'/'+index
+    console.log(url)
+    updates[url] = item
+    firebase.database().ref().update(updates)
+  })
+
+})
 
 
 
